@@ -17,13 +17,22 @@ jobs:
       
       - name: Find and add issues to project
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PROJECT_TOKEN }}
           PROJECT_URL: "https://github.com/users/HeshanSudarshana/projects/1"
         run: |
           echo "Starting to process issues with label '4.6.0-BugFixingEffort'"
           
-          # Get the project ID from the project URL
-          PROJECT_ID=$(gh api graphql -f query='
+          # Debug: List all available projects first
+          echo "Debugging: Fetching all available projects for user HeshanSudarshana"
+          echo "Note: Private projects require a Personal Access Token with project permissions"
+          
+          # Check if we have a valid token
+          if [ -z "$GITHUB_TOKEN" ]; then
+            echo "Error: No GitHub token available. Please set PROJECT_TOKEN secret with project permissions."
+            exit 1
+          fi
+          
+          ALL_PROJECTS=$(gh api graphql -f query='
             query($owner: String!) {
               user(login: $owner) {
                 projectsV2(first: 10) {
@@ -34,10 +43,36 @@ jobs:
                   }
                 }
               }
-            }' -f owner="HeshanSudarshana" --jq '.data.user.projectsV2.nodes[] | select(.number == 1) | .id')
+            }' -f owner="HeshanSudarshana" --jq '.data.user.projectsV2.nodes' 2>&1)
           
-          if [ -z "$PROJECT_ID" ]; then
+          echo "Available projects: $ALL_PROJECTS"
+          
+          # Get the project ID from the project URL
+          PROJECT_ID=$(echo "$ALL_PROJECTS" | jq -r '.[] | select(.number == 1) | .id')
+          
+          # Check for API errors (like permission issues)
+          if echo "$ALL_PROJECTS" | grep -q "error\|Error"; then
+            echo "API Error occurred:"
+            echo "$ALL_PROJECTS"
+            echo ""
+            echo "This usually means:"
+            echo "1. The PROJECT_TOKEN secret is missing or invalid"
+            echo "2. The token doesn't have 'Projects: Read and write' permissions"
+            echo "3. The project is private and the token can't access it"
+            exit 1
+          fi
+          
+          PROJECT_ID=$(echo "$ALL_PROJECTS" | jq -r '.[] | select(.number == 1) | .id')
+          
+          if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ]; then
             echo "Error: Could not find project with number 1"
+            echo "Available projects:"
+            if echo "$ALL_PROJECTS" | jq -e '. | length' > /dev/null 2>&1; then
+              echo "$ALL_PROJECTS" | jq -r '.[] | "- Project #\(.number): \(.title) (ID: \(.id))"'
+            else
+              echo "No projects found or permission denied"
+              echo "Raw response: $ALL_PROJECTS"
+            fi
             exit 1
           fi
           
