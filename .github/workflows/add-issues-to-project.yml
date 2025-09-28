@@ -103,7 +103,7 @@ jobs:
             
             # Check if the issue is already in the project
             EXISTING_ITEM=$(gh api graphql -f query='
-              query($projectId: ID!, $issueId: ID!) {
+              query($projectId: ID!) {
                 node(id: $projectId) {
                   ... on ProjectV2 {
                     items(first: 100) {
@@ -118,7 +118,7 @@ jobs:
                     }
                   }
                 }
-              }' -f projectId="$PROJECT_ID" -f issueId="$ISSUE_ID" --jq '.data.node.items.nodes[] | select(.content.id == "'$ISSUE_ID'") | .id')
+              }' -f projectId="$PROJECT_ID" --jq '.data.node.items.nodes[] | select(.content.id == "'$ISSUE_ID'") | .id')
             
             if [ -n "$EXISTING_ITEM" ]; then
               echo "Issue #$issue_number is already in the project (item ID: $EXISTING_ITEM)"
