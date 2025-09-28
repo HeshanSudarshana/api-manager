@@ -1,0 +1,111 @@
+name: Add Bug Fixing Issues to Project
+
+on:
+  workflow_dispatch:
+
+jobs:
+  add-issues-to-project:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: read
+      contents: read
+      repository-projects: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Find and add issues to project
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROJECT_URL: "https://github.com/users/HeshanSudarshana/projects/1"
+        run: |
+          echo "Starting to process issues with label '4.6.0-BugFixingEffort'"
+          
+          # Get the project ID from the project URL
+          PROJECT_ID=$(gh api graphql -f query='
+            query($owner: String!) {
+              user(login: $owner) {
+                projectsV2(first: 10) {
+                  nodes {
+                    id
+                    number
+                    title
+                  }
+                }
+              }
+            }' -f owner="HeshanSudarshana" --jq '.data.user.projectsV2.nodes[] | select(.number == 1) | .id')
+          
+          if [ -z "$PROJECT_ID" ]; then
+            echo "Error: Could not find project with number 1"
+            exit 1
+          fi
+          
+          echo "Found project ID: $PROJECT_ID"
+          
+          # Get all issues with the specific label
+          echo "Fetching issues with label '4.6.0-BugFixingEffort'"
+          
+          ISSUES=$(gh api repos/${{ github.repository }}/issues \
+            --method GET \
+            --field labels="4.6.0-BugFixingEffort" \
+            --field state="all" \
+            --jq '.[].number')
+          
+          if [ -z "$ISSUES" ]; then
+            echo "No issues found with label '4.6.0-BugFixingEffort'"
+            exit 0
+          fi
+          
+          echo "Found issues: $ISSUES"
+          
+          # For each issue, check if it's already in the project and add if not
+          for issue_number in $ISSUES; do
+            echo "Processing issue #$issue_number"
+            
+            # Get the global node ID for the issue
+            ISSUE_ID=$(gh api repos/${{ github.repository }}/issues/$issue_number --jq '.node_id')
+            
+            # Check if the issue is already in the project
+            EXISTING_ITEM=$(gh api graphql -f query='
+              query($projectId: ID!, $issueId: ID!) {
+                node(id: $projectId) {
+                  ... on ProjectV2 {
+                    items(first: 100) {
+                      nodes {
+                        id
+                        content {
+                          ... on Issue {
+                            id
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }' -f projectId="$PROJECT_ID" -f issueId="$ISSUE_ID" --jq '.data.node.items.nodes[] | select(.content.id == "'$ISSUE_ID'") | .id')
+            
+            if [ -n "$EXISTING_ITEM" ]; then
+              echo "Issue #$issue_number is already in the project (item ID: $EXISTING_ITEM)"
+            else
+              echo "Adding issue #$issue_number to project"
+              
+              # Add the issue to the project
+              ITEM_ID=$(gh api graphql -f query='
+                mutation($projectId: ID!, $contentId: ID!) {
+                  addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) {
+                    item {
+                      id
+                    }
+                  }
+                }' -f projectId="$PROJECT_ID" -f contentId="$ISSUE_ID" --jq '.data.addProjectV2ItemById.item.id')
+              
+              if [ -n "$ITEM_ID" ]; then
+                echo "✅ Successfully added issue #$issue_number to project (item ID: $ITEM_ID)"
+              else
+                echo "❌ Failed to add issue #$issue_number to project"
+              fi
+            fi
+          done
+          
+          echo "Completed processing all issues"
